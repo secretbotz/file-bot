@@ -1,0 +1,438 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+#                         ᴅᴀᴛᴀʙᴀsᴇ ᴍᴀɴᴀɢᴇʀ (ᴍᴏɴɢᴏᴅʙ)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import logging
+from datetime import datetime, timedelta
+from typing import Optional, List, Dict, Any, Union
+from pymongo import MongoClient, ASCENDING, DESCENDING, TEXT
+from pymongo.collection import Collection
+from pymongo.database import Database
+from bson.objectid import ObjectId
+
+from config import Config
+
+logger = logging.getLogger(__name__)
+
+class Database:
+    """ᴇɴᴛᴇʀᴘʀɪsᴇ-ɢʀᴀᴅᴇ ᴅᴀᴛᴀʙᴀsᴇ ᴍᴀɴᴀɢᴇʀ"""
+    
+    def __init__(self):
+        self.client: Optional[MongoClient] = None
+        self.db: Optional[Database] = None
+        self.users: Optional[Collection] = None
+        self.files: Optional[Collection] = None
+        self.payments: Optional[Collection] = None
+        self.chats: Optional[Collection] = None
+        self.referrals: Optional[Collection] = None
+        self.logs: Optional[Collection] = None
+        self.settings: Optional[Collection] = None
+        self.analytics: Optional[Collection] = None
+        self._connected = False
+    
+    async def connect(self):
+        """ᴇsᴛᴀʙʟɪsʜ ᴅᴀᴛᴀʙᴀsᴇ ᴄᴏɴɴᴇᴄᴛɪᴏɴ"""
+        try:
+            self.client = MongoClient(
+                Config.DATABASE_URL,
+                serverSelectionTimeoutMS=5000,
+                maxPoolSize=50
+            )
+            self.db = self.client[Config.DB_NAME]
+            
+            # ɪɴɪᴛɪᴀʟɪᴢᴇ ᴄᴏʟʟᴇᴄᴛɪᴏɴs
+            self.users = self.db.users
+            self.files = self.db.files
+            self.payments = self.db.payments
+            self.chats = self.db.chats
+            self.referrals = self.db.referrals
+            self.logs = self.db.logs
+            self.settings = self.db.settings
+            self.analytics = self.db.analytics
+            
+            self._connected = True
+            logger.info("✅ ᴅᴀᴛᴀʙᴀsᴇ ᴄᴏɴɴᴇᴄᴛᴇᴅ")
+            
+        except Exception as e:
+            logger.critical(f"❌ ᴅᴀᴛᴀʙᴀsᴇ ᴄᴏɴɴᴇᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ: {e}")
+            raise
+    
+    async def setup_indexes(self):
+        """ᴄʀᴇᴀᴛᴇ ᴏᴘᴛɪᴍɪᴢᴇᴅ ɪɴᴅᴇxᴇs"""
+        # ᴜsᴇʀs ɪɴᴅᴇxᴇs
+        self.users.create_index("user_id", unique=True)
+        self.users.create_index("username")
+        self.users.create_index("is_premium")
+        self.users.create_index("joined_date")
+        self.users.create_index("last_active")
+        
+        # ғɪʟᴇs ɪɴᴅᴇxᴇs
+        self.files.create_index("file_id", unique=True)
+        self.files.create_index("user_id")
+        self.files.create_index("file_name")
+        self.files.create_index("file_type")
+        self.files.create_index("upload_date")
+        self.files.create_index("is_deleted")
+        self.files.create_index([("file_name", TEXT), ("caption", TEXT)])
+        self.files.create_index("tags")
+        self.files.create_index("expires_at", expireAfterSeconds=0)  # ᴛᴛʟ ɪɴᴅᴇx
+        
+        # ᴘᴀʏᴍᴇɴᴛs
+        self.payments.create_index("payment_id", unique=True)
+        self.payments.create_index("user_id")
+        self.payments.create_index("status")
+        self.payments.create_index("created_at")
+        
+        # ʀᴇғᴇʀʀᴀʟs
+        self.referrals.create_index("referrer_id")
+        self.referrals.create_index("referred_id", unique=True)
+        
+        # ᴀɴᴀʟʏᴛɪᴄs
+        self.analytics.create_index("date")
+        self.analytics.create_index("user_id")
+        self.analytics.create_index("action")
+        
+        logger.info("✅ ᴅᴀᴛᴀʙᴀsᴇ ɪɴᴅᴇxᴇs ᴄʀᴇᴀᴛᴇᴅ")
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    #                              ᴜsᴇʀ ᴏᴘᴇʀᴀᴛɪᴏɴs
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    async def add_user(self, user_data: Dict) -> bool:
+        """ᴀᴅᴅ ᴏʀ ᴜᴘᴅᴀᴛᴇ ᴜsᴇʀ"""
+        try:
+            user_data.setdefault("joined_date", datetime.now())
+            user_data.setdefault("file_count", 0)
+            user_data.setdefault("total_storage", 0)
+            user_data.setdefault("is_premium", False)
+            user_data.setdefault("premium_expiry", None)
+            user_data.setdefault("language", "en")
+            user_data.setdefault("settings", {
+                "auto_delete": False,
+                "notifications": True,
+                "compact_view": False
+            })
+            user_data.setdefault("stats", {
+                "files_uploaded": 0,
+                "files_downloaded": 0,
+                "searches": 0,
+                "referrals": 0
+            })
+            user_data.setdefault("limits", {
+                "daily_uploads": 0,
+                "last_reset": datetime.now()
+            })
+            
+            self.users.update_one(
+                {"user_id": user_data["user_id"]},
+                {"$setOnInsert": user_data},
+                upsert=True
+            )
+            return True
+        except Exception as e:
+            logger.error(f"ᴜsᴇʀ ᴀᴅᴅ ᴇʀʀᴏʀ: {e}")
+            return False
+    
+    async def get_user(self, user_id: int) -> Optional[Dict]:
+        """ɢᴇᴛ ᴜsᴇʀ ʙʏ ɪᴅ"""
+        return self.users.find_one({"user_id": user_id})
+    
+    async def update_user(self, user_id: int, data: Dict) -> bool:
+        """ᴜᴘᴅᴀᴛᴇ ᴜsᴇʀ ᴅᴀᴛᴀ"""
+        try:
+            data["last_active"] = datetime.now()
+            self.users.update_one({"user_id": user_id}, {"$set": data})
+            return True
+        except Exception as e:
+            logger.error(f"ᴜsᴇʀ ᴜᴘᴅᴀᴛᴇ ᴇʀʀᴏʀ: {e}")
+            return False
+    
+    async def increment_stat(self, user_id: int, stat_name: str, value: int = 1):
+        """ɪɴᴄʀᴇᴍᴇɴᴛ ᴜsᴇʀ sᴛᴀᴛɪsᴛɪᴄ"""
+        self.users.update_one(
+            {"user_id": user_id},
+            {"$inc": {f"stats.{stat_name}": value}}
+        )
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    #                              ғɪʟᴇ ᴏᴘᴇʀᴀᴛɪᴏɴs
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    async def add_file(self, file_data: Dict) -> bool:
+        """ᴀᴅᴅ ɴᴇᴡ ғɪʟᴇ ᴡɪᴛʜ ᴍᴇᴛᴀᴅᴀᴛᴀ"""
+        try:
+            file_data.setdefault("upload_date", datetime.now())
+            file_data.setdefault("access_count", 0)
+            file_data.setdefault("is_deleted", False)
+            file_data.setdefault("is_public", False)
+            file_data.setdefault("tags", [])
+            file_data.setdefault("folder", "general")
+            
+            self.files.insert_one(file_data)
+            
+            # ᴜᴘᴅᴀᴛᴇ ᴜsᴇʀ ᴄᴏᴜɴᴛs
+            self.users.update_one(
+                {"user_id": file_data["user_id"]},
+                {
+                    "$inc": {
+                        "file_count": 1,
+                        "total_storage": file_data.get("file_size", 0),
+                        "stats.files_uploaded": 1
+                    }
+                }
+            )
+            return True
+        except Exception as e:
+            logger.error(f"ғɪʟᴇ ᴀᴅᴅ ᴇʀʀᴏʀ: {e}")
+            return False
+    
+    async def get_file(self, file_id: str) -> Optional[Dict]:
+        """ɢᴇᴛ ғɪʟᴇ ʙʏ ɪᴅ"""
+        return self.files.find_one({"file_id": file_id, "is_deleted": False})
+    
+    async def get_user_files(self, user_id: int, limit: int = 50, skip: int = 0, 
+                            folder: Optional[str] = None) -> List[Dict]:
+        """ɢᴇᴛ ᴜsᴇʀ ғɪʟᴇs ᴡɪᴛʜ ғɪʟᴛᴇʀɪɴɢ"""
+        query = {"user_id": user_id, "is_deleted": False}
+        if folder:
+            query["folder"] = folder
+        
+        return list(
+            self.files.find(query)
+            .sort("upload_date", DESCENDING)
+            .skip(skip)
+            .limit(limit)
+        )
+    
+    async def search_files(self, user_id: int, query: str, 
+                          file_type: Optional[str] = None,
+                          date_range: Optional[tuple] = None) -> List[Dict]:
+        """ᴀᴅᴠᴀɴᴄᴇᴅ ғɪʟᴇ sᴇᴀʀᴄʜ"""
+        search_query = {
+            "user_id": user_id,
+            "is_deleted": False,
+            "$text": {"$search": query}
+        }
+        
+        if file_type:
+            search_query["file_type"] = file_type
+        
+        if date_range:
+            search_query["upload_date"] = {
+                "$gte": date_range[0],
+                "$lte": date_range[1]
+            }
+        
+        return list(self.files.find(search_query).limit(50))
+    
+    async def delete_file(self, file_id: str, soft: bool = True) -> bool:
+        """sᴏғᴛ ᴏʀ ʜᴀʀᴅ ᴅᴇʟᴇᴛᴇ ғɪʟᴇ"""
+        try:
+            file = await self.get_file(file_id)
+            if not file:
+                return False
+            
+            if soft:
+                self.files.update_one(
+                    {"file_id": file_id},
+                    {"$set": {"is_deleted": True, "deleted_at": datetime.now()}}
+                )
+            else:
+                self.files.delete_one({"file_id": file_id})
+            
+            # ᴜᴘᴅᴀᴛᴇ ᴜsᴇʀ ᴄᴏᴜɴᴛs
+            self.users.update_one(
+                {"user_id": file["user_id"]},
+                {"$inc": {"file_count": -1, "total_storage": -file.get("file_size", 0)}}
+            )
+            return True
+        except Exception as e:
+            logger.error(f"ғɪʟᴇ ᴅᴇʟᴇᴛᴇ ᴇʀʀᴏʀ: {e}")
+            return False
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    #                              ᴘᴀʏᴍᴇɴᴛ ᴏᴘᴇʀᴀᴛɪᴏɴs
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    async def create_payment(self, user_id: int, payment_id: str, 
+                            amount: int, method: str = "upi") -> bool:
+        """ᴄʀᴇᴀᴛᴇ ᴘᴀʏᴍᴇɴᴛ ʀᴇᴄᴏʀᴅ"""
+        try:
+            self.payments.insert_one({
+                "payment_id": payment_id,
+                "user_id": user_id,
+                "amount": amount,
+                "method": method,
+                "status": "pending",
+                "created_at": datetime.now(),
+                "verified_at": None,
+                "verified_by": None
+            })
+            return True
+        except Exception as e:
+            logger.error(f"ᴘᴀʏᴍᴇɴᴛ ᴄʀᴇᴀᴛᴇ ᴇʀʀᴏʀ: {e}")
+            return False
+    
+    async def verify_payment(self, payment_id: str, admin_id: int) -> bool:
+        """ᴀᴘᴘʀᴏᴠᴇ ᴘᴀʏᴍᴇɴᴛ ᴀɴᴅ ɢʀᴀɴᴛ ᴘʀᴇᴍɪᴜᴍ"""
+        try:
+            payment = self.payments.find_one({"payment_id": payment_id})
+            if not payment or payment["status"] != "pending":
+                return False
+            
+            # ᴜᴘᴅᴀᴛᴇ ᴘᴀʏᴍᴇɴᴛ
+            self.payments.update_one(
+                {"payment_id": payment_id},
+                {
+                    "$set": {
+                        "status": "approved",
+                        "verified_at": datetime.now(),
+                        "verified_by": admin_id
+                    }
+                }
+            )
+            
+            # ɢʀᴀɴᴛ ᴘʀᴇᴍɪᴜᴍ
+            expiry = datetime.now() + timedelta(days=Config.PREMIUM_DAYS)
+            self.users.update_one(
+                {"user_id": payment["user_id"]},
+                {
+                    "$set": {
+                        "is_premium": True,
+                        "premium_expiry": expiry,
+                        "premium_started": datetime.now()
+                    }
+                }
+            )
+            return True
+        except Exception as e:
+            logger.error(f"ᴘᴀʏᴍᴇɴᴛ ᴠᴇʀɪғʏ ᴇʀʀᴏʀ: {e}")
+            return False
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    #                              ʀᴇғᴇʀʀᴀʟ sʏsᴛᴇᴍ
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    async def process_referral(self, referrer_id: int, referred_id: int) -> Dict:
+        """ᴘʀᴏᴄᴇss ʀᴇғᴇʀʀᴀʟ ᴀɴᴅ ᴄᴀʟᴄᴜʟᴀᴛᴇ ʀᴇᴡᴀʀᴅs"""
+        try:
+            # ᴄʜᴇᴄᴋ ɪғ ᴀʟʀᴇᴀᴅʏ ʀᴇғᴇʀʀᴇᴅ
+            existing = self.referrals.find_one({"referred_id": referred_id})
+            if existing:
+                return {"success": False, "error": "ᴀʟʀᴇᴀᴅʏ ʀᴇғᴇʀʀᴇᴅ"}
+            
+            # ᴄʜᴇᴄᴋ sᴇʟғ-ʀᴇғᴇʀʀᴀʟ
+            if referrer_id == referred_id:
+                return {"success": False, "error": "ᴄᴀɴɴᴏᴛ ʀᴇғᴇʀ ʏᴏᴜʀsᴇʟғ"}
+            
+            # ᴀᴅᴅ ʀᴇғᴇʀʀᴀʟ
+            self.referrals.insert_one({
+                "referrer_id": referrer_id,
+                "referred_id": referred_id,
+                "date": datetime.now(),
+                "rewarded": True
+            })
+            
+            # ᴄᴀʟᴄᴜʟᴀᴛᴇ ʀᴇᴡᴀʀᴅs
+            referrer = await self.get_user(referrer_id)
+            current_refs = referrer.get("stats", {}).get("referrals", 0)
+            
+            rewards = {
+                "free_files": min(Config.REFERRAL_REWARD, 
+                                 Config.REFERRAL_MAX - (current_refs * Config.REFERRAL_REWARD)),
+                "extra_days": Config.REFERRAL_BONUS_PREMIUM if referrer.get("is_premium") else 0
+            }
+            
+            # ᴀᴘᴘʟʏ ʀᴇᴡᴀʀᴅs
+            update_data = {
+                "$inc": {
+                    "stats.referrals": 1,
+                    "bonus_files": rewards["free_files"]
+                }
+            }
+            
+            if rewards["extra_days"] > 0 and referrer.get("premium_expiry"):
+                new_expiry = referrer["premium_expiry"] + timedelta(days=rewards["extra_days"])
+                update_data["$set"] = {"premium_expiry": new_expiry}
+            
+            self.users.update_one({"user_id": referrer_id}, update_data)
+            
+            return {"success": True, "rewards": rewards}
+            
+        except Exception as e:
+            logger.error(f"ʀᴇғᴇʀʀᴀʟ ᴇʀʀᴏʀ: {e}")
+            return {"success": False, "error": str(e)}
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    #                              ᴀɴᴀʟʏᴛɪᴄs
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    async def log_event(self, event_type: str, user_id: int, data: Dict = None):
+        """ʟᴏɢ ᴀɴᴀʟʏᴛɪᴄs ᴇᴠᴇɴᴛ"""
+        try:
+            self.analytics.insert_one({
+                "event": event_type,
+                "user_id": user_id,
+                "data": data or {},
+                "timestamp": datetime.now(),
+                "date": datetime.now().strftime("%Y-%m-%d")
+            })
+        except Exception as e:
+            logger.error(f"ᴀɴᴀʟʏᴛɪᴄs ʟᴏɢ ᴇʀʀᴏʀ: {e}")
+    
+    async def get_stats(self) -> Dict:
+        """ɢᴇᴛ ʙᴏᴛ sᴛᴀᴛɪsᴛɪᴄs"""
+        today = datetime.now().replace(hour=0, minute=0, second=0)
+        
+        return {
+            "total_users": self.users.count_documents({}),
+            "today_users": self.users.count_documents({"joined_date": {"$gte": today}}),
+            "active_today": self.users.count_documents({"last_active": {"$gte": today}}),
+            "total_files": self.files.count_documents({"is_deleted": False}),
+            "total_storage": sum(
+                f.get("file_size", 0) for f in self.files.find({"is_deleted": False})
+            ),
+            "premium_users": self.users.count_documents({"is_premium": True}),
+            "pending_payments": self.payments.count_documents({"status": "pending"}),
+            "today_uploads": self.files.count_documents({
+                "upload_date": {"$gte": today},
+                "is_deleted": False
+            })
+        }
+    
+    async def get_user_analytics(self, user_id: int) -> Dict:
+        """ɢᴇᴛ ᴅᴇᴛᴀɪʟᴇᴅ ᴜsᴇʀ ᴀɴᴀʟʏᴛɪᴄs"""
+        user = await self.get_user(user_id)
+        if not user:
+            return {}
+        
+        # ɢᴇᴛ ғɪʟᴇ ʙʀᴇᴀᴋᴅᴏᴡɴ ʙʏ ᴛʏᴘᴇ
+        pipeline = [
+            {"$match": {"user_id": user_id, "is_deleted": False}},
+            {"$group": {"_id": "$file_type", "count": {"$sum": 1}, "size": {"$sum": "$file_size"}}}
+        ]
+        file_stats = list(self.files.aggregate(pipeline))
+        
+        # ɢᴇᴛ ᴀᴄᴛɪᴠɪᴛʏ ʟᴀsᴛ 7 ᴅᴀʏs
+        week_ago = datetime.now() - timedelta(days=7)
+        activity = self.analytics.count_documents({
+            "user_id": user_id,
+            "timestamp": {"$gte": week_ago}
+        })
+        
+        return {
+            "user": user,
+            "file_breakdown": file_stats,
+            "weekly_activity": activity,
+            "storage_used": user.get("total_storage", 0),
+            "storage_limit": Config.MAX_FILE_SIZE_PREMIUM if user.get("is_premium") else Config.MAX_FILE_SIZE_FREE
+        }
+    
+    async def close(self):
+        """ᴄʟᴏsᴇ ᴅᴀᴛᴀʙᴀsᴇ ᴄᴏɴɴᴇᴄᴛɪᴏɴ"""
+        if self.client:
+            self.client.close()
+            logger.info("ᴅᴀᴛᴀʙᴀsᴇ ᴄᴏɴɴᴇᴄᴛɪᴏɴ ᴄʟᴏsᴇᴅ")
+
+# ɢʟᴏʙᴀʟ ɪɴsᴛᴀɴᴄᴇ
+db = Database()
