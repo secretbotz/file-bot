@@ -1,0 +1,126 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+#                         ᴘᴀʏᴍᴇɴᴛ sʏsᴛᴇᴍ ʜᴀɴᴅʟᴇʀs
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import logging
+import uuid
+from pyrogram import filters
+from pyrogram.types import Message, CallbackQuery
+
+from config import Config
+from database import db
+from utils.text import to_small_caps
+from utils.formatter import format_date
+from keyboards.payment import payment_keyboard, payment_confirm_keyboard
+
+logger = logging.getLogger(__name__)
+
+def register(app):
+    """ʀᴇɢɪsᴛᴇʀ ᴘᴀʏᴍᴇɴᴛ ʜᴀɴᴅʟᴇʀs"""
+    
+    @app.on_message(filters.command("pay") & filters.private)
+    async def pay_handler(client, message):
+        """ɪɴɪᴛɪᴀᴛᴇ ᴘᴀʏᴍᴇɴᴛ"""
+        user_id = message.from_user.id
+        
+        # ɢᴇɴᴇʀᴀᴛᴇ ᴜɴɪǫᴜᴇ ᴘᴀʏᴍᴇɴᴛ ɪᴅ
+        payment_id = f"PAY{user_id}{uuid.uuid4().hex[:8].upper()}"
+        
+        # ᴄʀᴇᴀᴛᴇ ᴘᴀʏᴍᴇɴᴛ ʀᴇᴄᴏʀᴅ
+        await db.create_payment(user_id, payment_id, Config.PAYMENT_AMOUNT)
+        
+        pay_text = f"""
+💎 ᴘʀᴇᴍɪᴜᴍ ᴜᴘɢʀᴀᴅᴇ
+
+💰 ᴀᴍᴏᴜɴᴛ: ₹{Config.PAYMENT_AMOUNT}
+⏱️ ᴅᴜʀᴀᴛɪᴏɴ: {Config.PREMIUM_DAYS} ᴅᴀʏs
+🆔 ᴘᴀʏᴍᴇɴᴛ ɪᴅ: `{payment_id}`
+
+📱 sᴄᴀɴ ǫʀ ᴄᴏᴅᴇ ᴏʀ ᴘᴀʏ ᴠɪᴀ ᴜᴘɪ:
+`{Config.UPI_ID}`
+
+⚠️ ɪᴍᴘᴏʀᴛᴀɴᴛ:
+1. ᴘᴀʏ ᴇxᴀᴄᴛʟʏ ₹{Config.PAYMENT_AMOUNT}
+2. ɪɴᴄʟᴜᴅᴇ ʏᴏᴜʀ ɪᴅ ɪɴ ʀᴇᴍᴀʀᴋs: `{user_id}`
+3. ᴄʟɪᴄᴋ "✅ ɪ'ᴠᴇ ᴘᴀɪᴅ" ʙᴇʟᴏᴡ
+4. sᴇɴᴅ ᴘᴀʏᴍᴇɴᴛ sᴄʀᴇᴇɴsʜᴏᴛ
+
+🎁 ʙᴇɴᴇғɪᴛs:
+• ᴜɴʟɪᴍɪᴛᴇᴅ ғɪʟᴇs
+• 2ɢʙ ᴜᴘʟᴏᴀᴅ ʟɪᴍɪᴛ
+• ᴘʀɪᴏʀɪᴛʏ sᴜᴘᴘᴏʀᴛ
+• ᴠɪᴘ ʙᴀᴅɢᴇ
+        """
+        
+        # sᴇɴᴅ ǫʀ ɪᴍᴀɢᴇ ɪғ ᴀᴠᴀɪʟᴀʙʟᴇ
+        try:
+            await message.reply_photo(
+                photo=Config.UPI_QR_PATH,
+                caption=to_small_caps(pay_text),
+                reply_markup=payment_confirm_keyboard(payment_id)
+            )
+        except:
+            await message.reply_text(
+                to_small_caps(pay_text),
+                reply_markup=payment_confirm_keyboard(payment_id)
+            )
+    
+    @app.on_callback_query(filters.regex("^paid_"))
+    async def paid_callback(client, callback_query):
+        """ʜᴀɴᴅʟᴇ ᴘᴀʏᴍᴇɴᴛ ᴄᴏɴғɪʀᴍᴀᴛɪᴏɴ"""
+        payment_id = callback_query.data.replace("paid_", "")
+        
+        await callback_query.message.edit_text(
+            to_small_caps(f"""
+⏳ ᴘᴀʏᴍᴇɴᴛ ᴠᴇʀɪғɪᴄᴀᴛɪᴏɴ
+
+ᴘᴀʏᴍᴇɴᴛ ɪᴅ: `{payment_id}`
+
+ᴘʟᴇᴀsᴇ sᴇɴᴅ sᴄʀᴇᴇɴsʜᴏᴛ ᴏғ ʏᴏᴜʀ ᴘᴀʏᴍᴇɴᴛ ɴᴏᴡ.
+            """)
+        )
+        
+        # sᴛᴏʀᴇ sᴛᴀᴛᴇ ғᴏʀ ɴᴇxᴛ ᴍᴇssᴀɢᴇ
+        await db.update_user(callback_query.from_user.id, {
+            "pending_payment_id": payment_id
+        })
+    
+    @app.on_message(filters.photo & filters.private)
+    async def payment_screenshot_handler(client, message):
+        """ʜᴀɴᴅʟᴇ ᴘᴀʏᴍᴇɴᴛ sᴄʀᴇᴇɴsʜᴏᴛ"""
+        user_id = message.from_user.id
+        user = await db.get_user(user_id)
+        
+        if not user or not user.get("pending_payment_id"):
+            return  # ɴᴏᴛ ᴀ ᴘᴀʏᴍᴇɴᴛ sᴄʀᴇᴇɴsʜᴏᴛ
+        
+        payment_id = user["pending_payment_id"]
+        
+        # ғᴏʀᴡᴀʀᴅ ᴛᴏ ᴏᴡɴᴇʀ ғᴏʀ ᴠᴇʀɪғɪᴄᴀᴛɪᴏɴ
+        try:
+            await message.forward(Config.OWNER_ID)
+            
+            # sᴇɴᴅ ᴠᴇʀɪғɪᴄᴀᴛɪᴏɴ ʀᴇǫᴜᴇsᴛ ᴛᴏ ᴏᴡɴᴇʀ
+            await client.send_message(
+                Config.OWNER_ID,
+                f"💰 ɴᴇᴡ ᴘᴀʏᴍᴇɴᴛ ғᴏʀ ᴠᴇʀɪғɪᴄᴀᴛɪᴏɴ\n\n"
+                f"ᴜsᴇʀ: {message.from_user.mention}\n"
+                f"ɪᴅ: `{user_id}`\n"
+                f"ᴘᴀʏᴍᴇɴᴛ ɪᴅ: `{payment_id}`",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("✅ ᴀᴘᴘʀᴏᴠᴇ", callback_data=f"approve_pay_{user_id}_{payment_id}"),
+                        InlineKeyboardButton("❌ ʀᴇᴊᴇᴄᴛ", callback_data=f"reject_pay_{user_id}_{payment_id}")
+                    ]
+                ])
+            )
+            
+            await message.reply_text(
+                to_small_caps("✅ sᴄʀᴇᴇɴsʜᴏᴛ ʀᴇᴄᴇɪᴠᴇᴅ! ᴡᴀɪᴛɪɴɢ ғᴏʀ ᴠᴇʀɪғɪᴄᴀᴛɪᴏɴ.")
+            )
+            
+            # ᴄʟᴇᴀʀ ᴘᴇɴᴅɪɴɢ sᴛᴀᴛᴇ
+            await db.update_user(user_id, {"$unset": {"pending_payment_id": ""}})
+            
+        except Exception as e:
+            logger.error(f"ғᴀɪʟᴇᴅ ᴛᴏ ғᴏʀᴡᴀʀᴅ ᴘᴀʏᴍᴇɴᴛ: {e}")
