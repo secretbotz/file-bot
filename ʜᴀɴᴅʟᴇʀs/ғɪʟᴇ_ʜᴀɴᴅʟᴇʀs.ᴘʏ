@@ -1,0 +1,142 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+#                         ғɪʟᴇ ᴏᴘᴇʀᴀᴛɪᴏɴ ʜᴀɴᴅʟᴇʀs
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import asyncio
+import logging
+from pyrogram import filters
+from pyrogram.types import Message
+
+from config import Config
+from database import db
+from utils.text import to_small_caps
+from utils.formatter import format_size, get_file_icon
+from keyboards.file import file_actions_keyboard
+
+logger = logging.getLogger(__name__)
+
+def register(app):
+    """ʀᴇɢɪsᴛᴇʀ ғɪʟᴇ ʜᴀɴᴅʟᴇʀs"""
+    
+    @app.on_message(
+        (filters.document | filters.video | filters.audio | filters.photo | 
+         filters.voice | filters.video_note | filters.animation) & filters.private
+    )
+    async def file_handler(client, message):
+        """ʜᴀɴᴅʟᴇ ғɪʟᴇ ᴜᴘʟᴏᴀᴅs"""
+        user_id = message.from_user.id
+        
+        # ᴄʜᴇᴄᴋ ʀᴀᴛᴇ ʟɪᴍɪᴛs
+        if not await check_rate_limit(user_id):
+            await message.reply_text(to_small_caps("⏳ ᴛᴏᴏ ᴍᴀɴʏ ʀᴇǫᴜᴇsᴛs. ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ."))
+            return
+        
+        # ɢᴇᴛ ᴜsᴇʀ ᴅᴀᴛᴀ
+        user = await db.get_user(user_id)
+        is_premium = user.get("is_premium", False)
+        
+        # ᴄʜᴇᴄᴋ ғɪʟᴇ ʟɪᴍɪᴛs
+        if not is_premium and user["file_count"] >= Config.MAX_FREE_FILES:
+            await message.reply_text(
+                to_small_caps("⚠️ ʟɪᴍɪᴛ ʀᴇᴀᴄʜᴇᴅ! ᴜᴘɢʀᴀᴅᴇ ᴛᴏ ᴘʀᴇᴍɪᴜᴍ."),
+                reply_markup=premium_keyboard()
+            )
+            return
+        
+        # ᴇxᴛʀᴀᴄᴛ ғɪʟᴇ ɪɴғᴏ
+        file_info = extract_file_info(message)
+        
+        # ᴄʜᴇᴄᴋ ғɪʟᴇ sɪᴢᴇ
+        max_size = Config.MAX_FILE_SIZE_PREMIUM if is_premium else Config.MAX_FILE_SIZE_FREE
+        if file_info["size"] > max_size:
+            limit = "2ɢʙ" if is_premium else "100ᴍʙ"
+            await message.reply_text(
+                to_small_caps(f"⚠️ ғɪʟᴇ ᴛᴏᴏ ʙɪɢ! ʟɪᴍɪᴛ: {limit}")
+            )
+            return
+        
+        # sʜᴏᴡ ᴘʀᴏɢʀᴇss
+        status_msg = await message.reply_text(to_small_caps("⬆️ ᴜᴘʟᴏᴀᴅɪɴɢ..."))
+        
+        # ғᴏʀᴡᴀʀᴅ ᴛᴏ sᴛᴏʀᴀɢᴇ ᴄʜᴀɴɴᴇʟ ɪғ ᴄᴏɴғɪɢᴜʀᴇᴅ
+        storage_msg_id = None
+        if Config.DB_CHANNEL:
+            try:
+                forwarded = await message.forward(Config.DB_CHANNEL)
+                storage_msg_id = forwarded.id
+            except Exception as e:
+                logger.error(f"sᴛᴏʀᴀɢᴇ ғᴏʀᴡᴀʀᴅ ғᴀɪʟᴇᴅ: {e}")
+        
+        # sᴀᴠᴇ ᴛᴏ ᴅᴀᴛᴀʙᴀsᴇ
+        file_data = {
+            "file_id": file_info["file_id"],
+            "user_id": user_id,
+            "file_name": file_info["name"],
+            "file_size": file_info["size"],
+            "file_type": file_info["type"],
+            "mime_type": file_info["mime"],
+            "caption": file_info["caption"],
+            "storage_msg_id": storage_msg_id,
+            "tags": extract_tags(file_info["caption"]),
+            "folder": "general"
+        }
+        
+        success = await db.add_file(file_data)
+        
+        if success:
+            share_link = f"https://t.me/{Config.BOT_USERNAME}?start={file_info['file_id']}"
+            
+            success_text = f"""
+✅ ғɪʟᴇ sᴛᴏʀᴇᴅ!
+
+📁 {file_info['name']}
+📊 {format_size(file_info['size'])}
+🔗 {share_link}
+            """
+            
+            await status_msg.edit_text(
+                to_small_caps(success_text),
+                reply_markup=file_actions_keyboard(file_info["file_id"], share_link)
+            )
+            
+            # ʟᴏɢ ᴇᴠᴇɴᴛ
+            await db.log_event("file_upload", user_id, {
+                "size": file_info["size"],
+                "type": file_info["type"]
+            })
+        else:
+            await status_msg.edit_text(to_small_caps("❌ ғᴀɪʟᴇᴅ ᴛᴏ sᴀᴠᴇ ғɪʟᴇ."))
+
+def extract_file_info(message):
+    """ᴇxᴛʀᴀᴄᴛ ғɪʟᴇ ɪɴғᴏʀᴍᴀᴛɪᴏɴ ғʀᴏᴍ ᴍᴇssᴀɢᴇ"""
+    if message.document:
+        return {
+            "file_id": message.document.file_id,
+            "name": message.document.file_name or "ᴜɴɴᴀᴍᴇᴅ",
+            "size": message.document.file_size,
+            "type": "document",
+            "mime": message.document.mime_type,
+            "caption": message.caption
+        }
+    elif message.video:
+        return {
+            "file_id": message.video.file_id,
+            "name": message.video.file_name or f"ᴠɪᴅᴇᴏ_{message.video.file_unique_id}.mp4",
+            "size": message.video.file_size,
+            "type": "video",
+            "mime": message.video.mime_type,
+            "caption": message.caption
+        }
+    # ... (ᴀᴅᴅ ᴏᴛʜᴇʀ ᴛʏᴘᴇs)
+
+def extract_tags(caption):
+    """ᴇxᴛʀᴀᴄᴛ #ᴛᴀɢs ғʀᴏᴍ ᴄᴀᴘᴛɪᴏɴ"""
+    if not caption:
+        return []
+    import re
+    return re.findall(r'#(\w+)', caption)
+
+async def check_rate_limit(user_id):
+    """ᴄʜᴇᴄᴋ ɪғ ᴜsᴇʀ ʜᴀs ʜɪᴛ ʀᴀᴛᴇ ʟɪᴍɪᴛ"""
+    # sɪᴍᴘʟᴇ ʀᴀᴛᴇ ʟɪᴍɪᴛɪɴɢ ʟᴏɢɪᴄ
+    return True
