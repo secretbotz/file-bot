@@ -1,0 +1,144 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+#                    ᴛᴇʟᴇɢʀᴀᴍ ғɪʟᴇ sᴛᴏʀᴀɢᴇ ʙᴏᴛ - ᴜʟᴛɪᴍᴀᴛᴇ ᴘʀᴇᴍɪᴜᴍ ᴇᴅɪᴛɪᴏɴ v10.0
+# ═══════════════════════════════════════════════════════════════════════════════
+# ᴀʀᴄʜɪᴛᴇᴄᴛᴜʀᴇ: ᴍᴏᴅᴜʟᴀʀ | sᴄᴀʟᴀʙʟᴇ | ᴇɴᴛᴇʀᴘʀɪsᴇ-ɢʀᴀᴅᴇ
+# ғᴇᴀᴛᴜʀᴇs: ᴀɪ-ᴘᴏᴡᴇʀᴇᴅ, ᴘᴀʏᴍᴇɴᴛs, ʀᴇғᴇʀʀᴀʟs, ᴀɴᴀʟʏᴛɪᴄs, ʙᴀᴛᴄʜ-ᴏᴘs
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import asyncio
+import logging
+import sys
+from pyrogram import Client, idle
+from pyrogram.enums import ParseMode
+
+from config import Config
+from database import Database
+from core.middleware import Middleware
+from core.scheduler import Scheduler
+from handlers import (
+    user_handlers, admin_handlers, payment_handlers, 
+    file_handlers, ai_handlers, callback_handlers
+)
+from utils.logger import setup_logging
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              ɢʟᴏʙᴀʟ ɪɴɪᴛɪᴀʟɪᴢᴀᴛɪᴏɴ
+# ═══════════════════════════════════════════════════════════════════════════════
+
+setup_logging()
+logger = logging.getLogger(__name__)
+db = Database()
+middleware = Middleware()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              ʙᴏᴛ ɪɴɪᴛɪᴀʟɪᴢᴀᴛɪᴏɴ
+# ═══════════════════════════════════════════════════════════════════════════════
+
+app = Client(
+    "filestore_ultimate",
+    api_id=Config.API_ID,
+    api_hash=Config.API_HASH,
+    bot_token=Config.BOT_TOKEN,
+    workers=200,
+    parse_mode=ParseMode.HTML,
+    max_concurrent_transmissions=10
+)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              ᴍɪᴅᴅʟᴇᴡᴀʀᴇ ʀᴇɢɪsᴛʀᴀᴛɪᴏɴ
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.on_message()
+async def middleware_handler(client, message):
+    """ɢʟᴏʙᴀʟ ᴍɪᴅᴅʟᴇᴡᴀʀᴇ ғᴏʀ ᴀʟʟ ᴍᴇssᴀɢᴇs"""
+    await middleware.process(client, message)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              ʜᴀɴᴅʟᴇʀ ʀᴇɢɪsᴛʀᴀᴛɪᴏɴ
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def register_handlers():
+    """ʀᴇɢɪsᴛᴇʀ ᴀʟʟ ʜᴀɴᴅʟᴇʀs sʏsᴛᴇᴍᴀᴛɪᴄᴀʟʟʏ"""
+    
+    # ᴜsᴇʀ ʜᴀɴᴅʟᴇʀs
+    user_handlers.register(app)
+    
+    # ғɪʟᴇ ʜᴀɴᴅʟᴇʀs
+    file_handlers.register(app)
+    
+    # ᴘᴀʏᴍᴇɴᴛ ʜᴀɴᴅʟᴇʀs
+    payment_handlers.register(app)
+    
+    # ᴀɪ ʜᴀɴᴅʟᴇʀs
+    ai_handlers.register(app)
+    
+    # ᴀᴅᴍɪɴ ʜᴀɴᴅʟᴇʀs
+    admin_handlers.register(app)
+    
+    # ᴄᴀʟʟʙᴀᴄᴋ ʜᴀɴᴅʟᴇʀs
+    callback_handlers.register(app)
+    
+    logger.info("✅ ᴀʟʟ ʜᴀɴᴅʟᴇʀs ʀᴇɢɪsᴛᴇʀᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              ᴍᴀɪɴ ғᴜɴᴄᴛɪᴏɴ
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def main():
+    """ᴍᴀɪɴ ᴇɴᴛʀʏ ᴘᴏɪɴᴛ"""
+    logger.info("🚀 ɪɴɪᴛɪᴀʟɪᴢɪɴɢ ᴜʟᴛɪᴍᴀᴛᴇ ғɪʟᴇ sᴛᴏʀᴀɢᴇ ʙᴏᴛ...")
+    
+    # ᴠᴀʟɪᴅᴀᴛᴇ ᴄᴏɴғɪɢ
+    Config.validate()
+    
+    # ɪɴɪᴛɪᴀʟɪᴢᴇ ᴅᴀᴛᴀʙᴀsᴇ
+    await db.connect()
+    await db.setup_indexes()
+    
+    # sᴛᴀʀᴛ sᴄʜᴇᴅᴜʟᴇʀ
+    scheduler = Scheduler(app, db)
+    await scheduler.start()
+    
+    # ʀᴇɢɪsᴛᴇʀ ʜᴀɴᴅʟᴇʀs
+    register_handlers()
+    
+    # sᴛᴀʀᴛ ʙᴏᴛ
+    await app.start()
+    me = await app.get_me()
+    
+    logger.info(f"""
+    ╔══════════════════════════════════════════╗
+    ║  🤖 ʙᴏᴛ sᴛᴀʀᴛᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ           ║
+    ║  @{me.username:<34}║
+    ║  ᴠᴇʀsɪᴏɴ: ᴜʟᴛɪᴍᴀᴛᴇ ᴘʀᴇᴍɪᴜᴍ v10.0      ║
+    ╚══════════════════════════════════════════╝
+    """)
+    
+    # sᴇɴᴅ sᴛᴀʀᴛᴜᴘ ɴᴏᴛɪғɪᴄᴀᴛɪᴏɴ
+    if Config.LOG_CHANNEL:
+        try:
+            await app.send_message(
+                Config.LOG_CHANNEL,
+                f"🤖 <b>ʙᴏᴛ sᴛᴀʀᴛᴇᴅ</b>\n\n"
+                f"ᴠᴇʀsɪᴏɴ: ᴜʟᴛɪᴍᴀᴛᴇ v10.0\n"
+                f"ᴛɪᴍᴇ: {Config.get_timestamp()}"
+            )
+        except Exception as e:
+            logger.warning(f"ᴄᴏᴜʟᴅ ɴᴏᴛ sᴇɴᴅ sᴛᴀʀᴛᴜᴘ ʟᴏɢ: {e}")
+    
+    await idle()
+    
+    # ɢʀᴀᴄᴇғᴜʟ sʜᴜᴛᴅᴏᴡɴ
+    await scheduler.stop()
+    await db.close()
+    await app.stop()
+    logger.info("🛑 ʙᴏᴛ sᴛᴏᴘᴘᴇᴅ ɢʀᴀᴄᴇғᴜʟʟʏ")
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("ғᴏʀᴄᴇ sᴛᴏᴘᴘᴇᴅ ʙʏ ᴜsᴇʀ")
+    except Exception as e:
+        logger.critical(f"ғᴀᴛᴀʟ ᴇʀʀᴏʀ: {e}")
+        sys.exit(1)
