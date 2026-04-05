@@ -1,0 +1,50 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+#                         ᴜɪ ᴋᴇʏʙᴏᴀʀᴅs
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+def main_menu_keyboard(is_premium=False, is_owner=False):
+    """ᴍᴀɪɴ ᴍᴇɴᴜ"""
+    buttons = [
+        [
+            InlineKeyboardButton("📁 ᴍʏ ғɪʟᴇs", callback_data="myfiles"),
+            InlineKeyboardButton("📤 ᴜᴘʟᴏᴀᴅ", callback_data="upload")
+        ],
+        [
+            InlineKeyboardButton("🔍 sᴇᴀʀᴄʜ", callback_data="search"),
+            InlineKeyboardButton("🤖 ᴀɪ ᴄʜᴀᴛ", callback_data="ai_chat")
+        ],
+        [
+            InlineKeyboardButton("⚙️ sᴇᴛᴛɪɴɢs", callback_data="settings"),
+            InlineKeyboardButton("❓ ʜᴇʟᴘ", callback_data="help")
+        ],
+        [
+            InlineKeyboardButton(
+                "💎 ᴘʀᴇᴍɪᴜᴍ" if not is_premium else "💎 ᴘʀᴇᴍɪᴜᴍ ᴀᴄᴛɪᴠᴇ", 
+                callback_data="premium"
+            )
+        ],
+        [
+            InlineKeyboardButton("🎁 ʀᴇғᴇʀ & ᴇᴀʀɴ", callback_data="referral")
+        ]
+    ]
+    
+    if is_owner:
+        buttons.append([
+            InlineKeyboardButton("🔐 ᴀᴅᴍɪɴ ᴘᴀɴᴇʟ", callback_data="admin")
+        ])
+    
+    return InlineKeyboardMarkup(buttons)
+
+def force_sub_keyboard():
+    """ғᴏʀᴄᴇ sᴜʙsᴄʀɪᴘᴛɪᴏɴ"""
+    from config import Config
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📢 ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ", url=f"https://t.me/{Config.FORCE_SUB_CHANNEL.lstrip('@')}")
+        ],
+        [
+            InlineKeyboardButton("✅ ᴠᴇʀɪғʏ", callback_data="check_sub")
+        ]
+    ])
