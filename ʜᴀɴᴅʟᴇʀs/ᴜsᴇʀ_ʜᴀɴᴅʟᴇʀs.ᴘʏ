@@ -1,0 +1,122 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+#                         ᴜsᴇʀ ᴄᴏᴍᴍᴀɴᴅ ʜᴀɴᴅʟᴇʀs
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import logging
+from pyrogram import filters
+from pyrogram.types import Message
+
+from config import Config
+from database import db
+from utils.text import to_small_caps
+from utils.formatter import format_size, format_time
+from keyboards.main import main_menu_keyboard, force_sub_keyboard
+from core.middleware import require_subscription
+
+logger = logging.getLogger(__name__)
+
+def register(app):
+    """ʀᴇɢɪsᴛᴇʀ ᴜsᴇʀ ʜᴀɴᴅʟᴇʀs"""
+    
+    @app.on_message(filters.command("start") & filters.private)
+    async def start_handler(client: Client, message: Message):
+        """sᴛᴀʀᴛ ᴄᴏᴍᴍᴀɴᴅ"""
+        user_id = message.from_user.id
+        
+        # ᴘᴀʀsᴇ ʀᴇғᴇʀʀᴀʟ ᴏʀ ғɪʟᴇ ᴘᴀʀᴀᴍᴇᴛᴇʀs
+        param = message.command[1] if len(message.command) > 1 else None
+        
+        if param and param.startswith("ref"):
+            # ᴘʀᴏᴄᴇss ʀᴇғᴇʀʀᴀʟ
+            referrer_id = int(param.replace("ref", ""))
+            result = await db.process_referral(referrer_id, user_id)
+            if result["success"]:
+                await message.reply_text(
+                    to_small_caps(f"🎁 ʏᴏᴜ ᴡᴇʀᴇ ʀᴇғᴇʀʀᴇᴅ! ʏᴏᴜ ᴀɴᴅ ʏᴏᴜʀ ғʀɪᴇɴᴅ ɢᴏᴛ ʙᴏɴᴜs!")
+                )
+        
+        # ᴀᴅᴅ/ᴜᴘᴅᴀᴛᴇ ᴜsᴇʀ
+        await db.add_user({
+            "user_id": user_id,
+            "username": message.from_user.username,
+            "first_name": message.from_user.first_name,
+            "last_name": message.from_user.last_name
+        })
+        
+        # ᴄʜᴇᴄᴋ ғᴏʀᴄᴇ sᴜʙ
+        if not await require_subscription(client, user_id):
+            await message.reply_text(
+                to_small_caps("⚠️ ᴊᴏɪɴ ᴏᴜʀ ᴄʜᴀɴɴᴇʟ ғɪʀsᴛ!"),
+                reply_markup=force_sub_keyboard()
+            )
+            return
+        
+        # sʜᴏᴡ ᴡᴇʟᴄᴏᴍᴇ
+        user = await db.get_user(user_id)
+        is_premium = user.get("is_premium", False)
+        
+        welcome_text = f"""
+🎉 ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴛʜᴇ ᴜʟᴛɪᴍᴀᴛᴇ ғɪʟᴇ sᴛᴏʀᴀɢᴇ ʙᴏᴛ!
+
+ʜᴇʏ {message.from_user.mention}!
+
+💎 ғᴇᴀᴛᴜʀᴇs:
+• ᴜɴʟɪᴍɪᴛᴇᴅ sᴛᴏʀᴀɢᴇ (ᴘʀᴇᴍɪᴜᴍ)
+• ᴀɪ-ᴘᴏᴡᴇʀᴇᴅ sᴇᴀʀᴄʜ
+• ʙᴀᴛᴄʜ ᴏᴘᴇʀᴀᴛɪᴏɴs
+• ᴀᴅᴠᴀɴᴄᴇᴅ sᴇᴄᴜʀɪᴛʏ
+• ᴘᴀʏᴍᴇɴᴛ ɪɴᴛᴇɢʀᴀᴛɪᴏɴ
+
+ᴊᴜsᴛ sᴇɴᴅ ᴍᴇ ᴀɴʏ ғɪʟᴇ ᴛᴏ sᴛᴀʀᴛ!
+        """
+        
+        await message.reply_text(
+            to_small_caps(welcome_text),
+            reply_markup=main_menu_keyboard(is_premium=is_premium)
+        )
+    
+    @app.on_message(filters.command("stats") & filters.private)
+    async def stats_handler(client, message):
+        """ᴜsᴇʀ sᴛᴀᴛɪsᴛɪᴄs"""
+        user_id = message.from_user.id
+        analytics = await db.get_user_analytics(user_id)
+        user = analytics["user"]
+        
+        stats_text = f"""
+📊 ʏᴏᴜʀ sᴛᴀᴛɪsᴛɪᴄs
+
+📁 ғɪʟᴇs: {user['file_count']}
+💾 sᴛᴏʀᴀɢᴇ: {format_size(user['total_storage'])}
+👥 ʀᴇғᴇʀʀᴀʟs: {user['stats']['referrals']}
+⭐ sᴛᴀᴛᴜs: {'💎 ᴘʀᴇᴍɪᴜᴍ' if user['is_premium'] else '🆓 ғʀᴇᴇ'}
+
+ᴛᴏᴅᴀʏ's ᴀᴄᴛɪᴠɪᴛʏ: {analytics['weekly_activity']} ᴀᴄᴛɪᴏɴs
+        """
+        
+        await message.reply_text(to_small_caps(stats_text))
+    
+    @app.on_message(filters.command("referral") & filters.private)
+    async def referral_handler(client, message):
+        """ʀᴇғᴇʀʀᴀʟ sʏsᴛᴇᴍ"""
+        user_id = message.from_user.id
+        ref_link = f"https://t.me/{Config.BOT_USERNAME}?start=ref{user_id}"
+        
+        ref_text = f"""
+🎁 ʀᴇғᴇʀ & ᴇᴀʀɴ
+
+ʏᴏᴜʀ ʟɪɴᴋ: `{ref_link}`
+
+ʀᴇᴡᴀʀᴅs:
+• 5 ғʀᴇᴇ ғɪʟᴇs ᴘᴇʀ ғʀɪᴇɴᴅ
+• ᴍᴀx 100 ғʀᴇᴇ ғɪʟᴇs
+• 3 ᴇxᴛʀᴀ ᴅᴀʏs ɪғ ᴘʀᴇᴍɪᴜᴍ
+
+sʜᴀʀᴇ ᴀɴᴅ ᴇᴀʀɴ ɴᴏᴡ!
+        """
+        
+        from keyboards.payment import referral_keyboard
+        await message.reply_text(
+            to_small_caps(ref_text),
+            reply_markup=referral_keyboard(ref_link),
+            disable_web_page_preview=True
+        )
