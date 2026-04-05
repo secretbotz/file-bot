@@ -1,0 +1,91 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+#                         ᴄᴏɴғɪɢᴜʀᴀᴛɪᴏɴ ᴍᴀɴᴀɢᴇʀ
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import os
+import re
+from dataclasses import dataclass, field
+from typing import Optional, List
+from datetime import datetime
+
+@dataclass
+class Config:
+    """ᴇɴᴛᴇʀᴘʀɪsᴇ ᴄᴏɴғɪɢᴜʀᴀᴛɪᴏɴ ᴄʟᴀss"""
+    
+    # ─── ʙᴏᴛ ᴄʀᴇᴅᴇɴᴛɪᴀʟs ───
+    API_ID: int = int(os.getenv("API_ID", "0"))
+    API_HASH: str = os.getenv("API_HASH", "")
+    BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
+    BOT_USERNAME: str = os.getenv("BOT_USERNAME", "")
+    
+    # ─── ᴅᴀᴛᴀʙᴀsᴇ ───
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+    DB_NAME: str = os.getenv("DB_NAME", "filestore_ultimate")
+    
+    # ─── ᴄʜᴀɴɴᴇʟs (ғʟᴇxɪʙʟᴇ: sᴜᴘᴘᴏʀᴛs @username ᴏʀ ɪᴅ) ───
+    FORCE_SUB_CHANNEL: str = os.getenv("FORCE_SUB_CHANNEL", "")
+    LOG_CHANNEL: str = os.getenv("LOG_CHANNEL", "")
+    DB_CHANNEL: str = os.getenv("DB_CHANNEL", "")  # ғᴏʀ ғɪʟᴇ sᴛᴏʀᴀɢᴇ
+    ADMIN_CHANNEL: str = os.getenv("ADMIN_CHANNEL", "")  # ғᴏʀ ᴀᴅᴍɪɴ ᴀʟᴇʀᴛs
+    
+    # ─── ᴏᴡɴᴇʀs ───
+    OWNER_ID: int = int(os.getenv("OWNER_ID", "0"))
+    OWNER_USERNAME: str = os.getenv("OWNER_USERNAME", "its_me_secret")
+    ADMIN_IDS: List[int] = field(default_factory=lambda: [
+        int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()
+    ])
+    
+    # ─── ᴀɪ ᴄᴏɴғɪɢ ───
+    XAI_API_KEY: str = os.getenv("XAI_API_KEY", "")
+    GROK_MODEL: str = os.getenv("GROK_MODEL", "grok-3")
+    AI_ENABLED: bool = bool(os.getenv("XAI_API_KEY"))
+    
+    # ─── ᴘᴀʏᴍᴇɴᴛ ᴄᴏɴғɪɢ ───
+    UPI_ID: str = os.getenv("UPI_ID", "")
+    UPI_QR_PATH: str = os.getenv("UPI_QR_PATH", "payment_qr.jpg")
+    PAYMENT_AMOUNT: int = int(os.getenv("PAYMENT_AMOUNT", "9"))  # ₹9
+    PREMIUM_DAYS: int = int(os.getenv("PREMIUM_DAYS", "30"))
+    CRYPTO_ENABLED: bool = os.getenv("CRYPTO_ENABLED", "false").lower() == "true"
+    
+    # ─── sᴇᴄᴜʀɪᴛʏ ───
+    ANTI_SPAM: bool = True
+    RATE_LIMIT: int = int(os.getenv("RATE_LIMIT", "20"))  # ᴍsɢs ᴘᴇʀ ᴍɪɴᴜᴛᴇ
+    SESSION_TIMEOUT: int = 3600  # 1 ʜᴏᴜʀ
+    
+    # ─── ғᴇᴀᴛᴜʀᴇs ───
+    MAX_FREE_FILES: int = 100
+    MAX_PREMIUM_FILES: int = 100000  # ᴠɪʀᴛᴜᴀʟʟʏ ᴜɴʟɪᴍɪᴛᴇᴅ
+    MAX_FILE_SIZE_FREE: int = 100 * 1024 * 1024  # 100ᴍʙ
+    MAX_FILE_SIZE_PREMIUM: int = 2 * 1024 * 1024 * 1024  # 2ɢʙ
+    BATCH_SIZE: int = 10  # ғɪʟᴇs ᴘᴇʀ ʙᴀᴛᴄʜ
+    
+    # ─── ʀᴇғᴇʀʀᴀʟ ───
+    REFERRAL_REWARD: int = 5  # ғʀᴇᴇ ғɪʟᴇs
+    REFERRAL_MAX: int = 100  # ᴍᴀx ᴇᴀʀɴᴀʙʟᴇ
+    REFERRAL_BONUS_PREMIUM: int = 3  # ᴅᴀʏs ᴇxᴛʀᴀ ғᴏʀ ʀᴇғᴇʀʀᴇʀ
+    
+    # ─── sᴄʜᴇᴅᴜʟᴇʀ ───
+    BACKUP_INTERVAL: int = 86400  # 24 ʜᴏᴜʀs
+    CLEANUP_INTERVAL: int = 3600  # 1 ʜᴏᴜʀ
+    EXPIRY_CHECK_INTERVAL: int = 1800  # 30 ᴍɪɴs
+    
+    @classmethod
+    def validate(cls):
+        """ᴠᴀʟɪᴅᴀᴛᴇ ᴀʟʟ ᴄᴏɴғɪɢᴜʀᴀᴛɪᴏɴs"""
+        required = ['API_ID', 'API_HASH', 'BOT_TOKEN', 'DATABASE_URL', 'OWNER_ID']
+        missing = [f for f in required if not getattr(cls, f)]
+        
+        if missing:
+            raise ValueError(f"ᴍɪssɪɴɢ ʀᴇǫᴜɪʀᴇᴅ ᴄᴏɴғɪɢs: {', '.join(missing)}")
+        
+        # ᴠᴀʟɪᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ ғᴏʀᴍᴀᴛs
+        if cls.LOG_CHANNEL and not (cls.LOG_CHANNEL.startswith('-100') or cls.LOG_CHANNEL.startswith('@')):
+            raise ValueError("ʟᴏɢ_ᴄʜᴀɴɴᴇʟ ᴍᴜsᴛ sᴛᴀʀᴛ ᴡɪᴛʜ -100 (ɪᴅ) ᴏʀ @ (ᴜsᴇʀɴᴀᴍᴇ)")
+    
+    @staticmethod
+    def get_timestamp() -> str:
+        """ɢᴇᴛ ғᴏʀᴍᴀᴛᴛᴇᴅ ᴛɪᴍᴇsᴛᴀᴍᴘ"""
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+# ɪɴsᴛᴀɴᴛɪᴀᴛᴇ
+Config = Config()
